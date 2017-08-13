@@ -1,15 +1,17 @@
 import json
+import os
+from hashlib import md5
 from config import *
 import re
-
 import pymongo
 import requests
 from urllib.parse import urlencode
+from multiprocessing import Pool
 
 from bs4 import BeautifulSoup
 from requests.exceptions import RequestException
 
-client = pymongo.MongoClient(MONGO_URL)
+client = pymongo.MongoClient(MONGO_URL, connect=False)
 db = client[MONGO_DB]
 
 def get_page_index(offset, keyword):
@@ -61,6 +63,7 @@ def parse_page_detail(html, url):
         if data and 'sub_images' in data.keys():
             sub_images = data.get('sub_images')
             images = [item.get('url') for item in sub_images]
+            for image in images: download_image(image)
             return {
                 'title': title,
                 'url': url,
@@ -74,8 +77,29 @@ def save_to_mongo(result):
         return True
     return False
 
-def main():
-    html = get_page_index(0, '街拍')
+
+def download_image(url):
+    print("Picture is downloading", url)
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            save_image(response.content)
+        return None
+    except RequestException:
+        print("Request Images Failed!", url)
+        return None
+
+def save_image(content):
+    file_dir = '{0}/{1}'.format(os.getcwd(), KEYWORD)
+    if not os.path.exists(file_dir): os.mkdir(file_dir)
+    file_path = '{0}/{1}.{2}'.format(file_dir, md5(content).hexdigest(),'jpg')
+    if not os.path.exists(file_path):
+        with open(file_path, 'wb') as f:
+            f.write(content)
+            f.close()
+
+def main(offset):
+    html = get_page_index(offset, KEYWORD)
     for url in parse_page_index(html):
         html = get_page_detail(url)
         if html:
@@ -85,4 +109,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    groups = [x * 20 for x in range(GROUP_START, GROUP_END)]
+    pool = Pool()
+    pool.map(main, groups)
+
